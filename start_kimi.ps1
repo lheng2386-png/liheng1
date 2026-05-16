@@ -65,6 +65,7 @@ function Add-SystemMessage {
     )
 
     $systemPrompt = New-SystemPrompt -AnswerMode $AnswerMode
+
     [void]$Messages.Add(@{
         role = "system"
         content = $systemPrompt
@@ -73,36 +74,47 @@ function Add-SystemMessage {
 
 function Trim-Messages {
     param(
+        [System.Collections.ArrayList]$Messages,
+        [int]$MaxCount = 25
+    )
+
+    while ($Messages.Count -gt $MaxCount) {
+        # Keep system prompt at index 0, remove oldest non-system message.
+        $Messages.RemoveAt(1)
+    }
+}
+
+function Remove-LastMessage {
+    param(
         [System.Collections.ArrayList]$Messages
     )
 
-    if ($Messages.Count -le 25) {
-        return $Messages
+    try {
+        if ($Messages.Count -gt 1) {
+            $Messages.RemoveAt($Messages.Count - 1)
+        }
+    } catch {
+        Write-Output "Context cleanup skipped."
     }
-
-    $newMessages = New-Object System.Collections.ArrayList
-    [void]$newMessages.Add($Messages[0])
-
-    for ($i = [Math]::Max(1, $Messages.Count - 24); $i -lt $Messages.Count; $i++) {
-        [void]$newMessages.Add($Messages[$i])
-    }
-
-    return $newMessages
 }
 
 function Get-ClipboardImageDataUrl {
-    $img = [System.Windows.Forms.Clipboard]::GetImage()
+    try {
+        $img = [System.Windows.Forms.Clipboard]::GetImage()
 
-    if ($null -eq $img) {
+        if ($null -eq $img) {
+            return $null
+        }
+
+        $ms = New-Object System.IO.MemoryStream
+        $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+        $bytes = $ms.ToArray()
+        $base64 = [Convert]::ToBase64String($bytes)
+
+        return "data:image/png;base64,$base64"
+    } catch {
         return $null
     }
-
-    $ms = New-Object System.IO.MemoryStream
-    $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
-    $bytes = $ms.ToArray()
-    $base64 = [Convert]::ToBase64String($bytes)
-
-    return "data:image/png;base64,$base64"
 }
 
 function kimi-chat {
@@ -290,7 +302,7 @@ function kimi-chat {
             })
         }
 
-        $messages = Trim-Messages -Messages $messages
+        Trim-Messages -Messages $messages -MaxCount 25
 
         $headers = @{
             "Authorization" = "Bearer $env:KIMI_API_KEY"
@@ -342,9 +354,7 @@ function kimi-chat {
             Write-Output ""
             Write-Output "Request failed. The last question has been removed from context."
 
-            if ($messages.Count -gt 1) {
-                $messages.RemoveAt($messages.Count - 1)
-            }
+            Remove-LastMessage -Messages $messages
 
             $errText = ""
 
