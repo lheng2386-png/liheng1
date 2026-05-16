@@ -10,6 +10,11 @@ try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 } catch {}
 
+try {
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+} catch {}
+
 Write-Output "Kimi terminal chat starter"
 Write-Output "Do NOT put your API key into GitHub."
 Write-Output "Paste your Kimi API Key when asked. It will not be shown on screen."
@@ -37,10 +42,11 @@ function New-SystemPrompt {
 function Show-Help {
     Write-Output ""
     Write-Output "Commands:"
-    Write-Output "  /clip      read clipboard and send"
+    Write-Output "  /clip      read clipboard text and send"
+    Write-Output "  /shot      read screenshot image from clipboard and ask about it"
     Write-Output "  /code      code-only mode"
     Write-Output "  /chat      normal explanation mode"
-    Write-Output "  /fast      faster mode"
+    Write-Output "  /fast      faster mode, disable thinking"
     Write-Output "  /quality   quality mode"
     Write-Output "  /reset     clear context"
     Write-Output "  /open      open last answer in Notepad"
@@ -50,6 +56,53 @@ function Show-Help {
     Write-Output "  /help      show commands"
     Write-Output "  /exit      exit"
     Write-Output ""
+}
+
+function Add-SystemMessage {
+    param(
+        [System.Collections.ArrayList]$Messages,
+        [string]$AnswerMode
+    )
+
+    $systemPrompt = New-SystemPrompt -AnswerMode $AnswerMode
+    [void]$Messages.Add(@{
+        role = "system"
+        content = $systemPrompt
+    })
+}
+
+function Trim-Messages {
+    param(
+        [System.Collections.ArrayList]$Messages
+    )
+
+    if ($Messages.Count -le 25) {
+        return $Messages
+    }
+
+    $newMessages = New-Object System.Collections.ArrayList
+    [void]$newMessages.Add($Messages[0])
+
+    for ($i = [Math]::Max(1, $Messages.Count - 24); $i -lt $Messages.Count; $i++) {
+        [void]$newMessages.Add($Messages[$i])
+    }
+
+    return $newMessages
+}
+
+function Get-ClipboardImageDataUrl {
+    $img = [System.Windows.Forms.Clipboard]::GetImage()
+
+    if ($null -eq $img) {
+        return $null
+    }
+
+    $ms = New-Object System.IO.MemoryStream
+    $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+    $bytes = $ms.ToArray()
+    $base64 = [Convert]::ToBase64String($bytes)
+
+    return "data:image/png;base64,$base64"
 }
 
 function kimi-chat {
@@ -66,18 +119,14 @@ function kimi-chat {
     $lastAnswerFile = "$PWD\kimi_last_answer.txt"
     $lastAnswer = ""
 
-    $systemPrompt = New-SystemPrompt -AnswerMode $answerMode
-
     $messages = New-Object System.Collections.ArrayList
-    [void]$messages.Add(@{
-        role = "system"
-        content = $systemPrompt
-    })
+    Add-SystemMessage -Messages $messages -AnswerMode $answerMode
 
     Write-Output ""
     Write-Output "Kimi chat started."
     Write-Output "Short question: type directly."
-    Write-Output "Long problem: copy it first, then type /clip."
+    Write-Output "Long text problem: copy it first, then type /clip."
+    Write-Output "Screenshot problem: use Win + Shift + S, then type /shot."
     Write-Output "Recommended: use /code before asking for complete C++ code."
     Show-Help
 
@@ -126,11 +175,7 @@ function kimi-chat {
         if ($cmd -eq "/code") {
             $answerMode = "code"
             $messages.Clear()
-            $systemPrompt = New-SystemPrompt -AnswerMode $answerMode
-            [void]$messages.Add(@{
-                role = "system"
-                content = $systemPrompt
-            })
+            Add-SystemMessage -Messages $messages -AnswerMode $answerMode
             Write-Output "Switched to code-only mode. Context cleared."
             continue
         }
@@ -138,11 +183,7 @@ function kimi-chat {
         if ($cmd -eq "/chat") {
             $answerMode = "chat"
             $messages.Clear()
-            $systemPrompt = New-SystemPrompt -AnswerMode $answerMode
-            [void]$messages.Add(@{
-                role = "system"
-                content = $systemPrompt
-            })
+            Add-SystemMessage -Messages $messages -AnswerMode $answerMode
             Write-Output "Switched to normal chat mode. Context cleared."
             continue
         }
@@ -172,14 +213,12 @@ function kimi-chat {
 
         if ($cmd -eq "/reset") {
             $messages.Clear()
-            $systemPrompt = New-SystemPrompt -AnswerMode $answerMode
-            [void]$messages.Add(@{
-                role = "system"
-                content = $systemPrompt
-            })
+            Add-SystemMessage -Messages $messages -AnswerMode $answerMode
             Write-Output "Context cleared."
             continue
         }
+
+        $addedUserMessage = $false
 
         if ($cmd -eq "/clip") {
             try {
@@ -191,31 +230,67 @@ function kimi-chat {
                 }
 
                 $q = $clipText
-                Write-Output "Clipboard content loaded. Sending to Kimi..."
+                Write-Output "Clipboard text loaded. Sending to Kimi..."
             }
             catch {
-                Write-Output "Failed to read clipboard. You can type a short question directly."
+                Write-Output "Failed to read clipboard text. You can type a short question directly."
                 continue
             }
-        } else {
+        }
+        elseif ($cmd -eq "/shot") {
+            try {
+                $dataUrl = Get-ClipboardImageDataUrl
+
+                if ([string]::IsNullOrWhiteSpace($dataUrl)) {
+                    Write-Output "Clipboard has no image. Use Win + Shift + S first, then type /shot."
+                    continue
+                }
+
+                $imgQuestion = Read-Host "Question for this screenshot"
+
+                if ([string]::IsNullOrWhiteSpace($imgQuestion)) {
+                    $imgQuestion = "Please read this screenshot. If it is a C++ or algorithm problem, explain the problem in Chinese and give a beginner-friendly C++17 solution."
+                }
+
+                $userContent = @(
+                    @{
+                        type = "text"
+                        text = $imgQuestion
+                    },
+                    @{
+                        type = "image_url"
+                        image_url = @{
+                            url = $dataUrl
+                        }
+                    }
+                )
+
+                [void]$messages.Add(@{
+                    role = "user"
+                    content = $userContent
+                })
+
+                $addedUserMessage = $true
+                Write-Output "Screenshot loaded. Sending to Kimi..."
+            }
+            catch {
+                Write-Output "Failed to read screenshot from clipboard."
+                Write-Output $_.Exception.Message
+                continue
+            }
+        }
+        else {
             $q = $cmd
         }
 
-        [void]$messages.Add(@{
-            role = "user"
-            content = $q
-        })
-
-        if ($messages.Count -gt 25) {
-            $newMessages = New-Object System.Collections.ArrayList
-            [void]$newMessages.Add($messages[0])
-
-            for ($i = [Math]::Max(1, $messages.Count - 24); $i -lt $messages.Count; $i++) {
-                [void]$newMessages.Add($messages[$i])
-            }
-
-            $messages = $newMessages
+        if (-not $addedUserMessage) {
+            [void]$messages.Add(@{
+                role = "user"
+                content = $q
+            })
         }
+
+        $messages = Trim-Messages -Messages $messages
 
         $headers = @{
             "Authorization" = "Bearer $env:KIMI_API_KEY"
@@ -234,7 +309,7 @@ function kimi-chat {
             }
         }
 
-        $json = $bodyObj | ConvertTo-Json -Depth 50
+        $json = $bodyObj | ConvertTo-Json -Depth 80
         $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($json)
 
         try {
@@ -286,17 +361,18 @@ function kimi-chat {
             }
 
             if ([string]::IsNullOrWhiteSpace($errText)) {
-                $errText = "No detailed error returned. Possible causes: network issue, invalid API key, rate limit, insufficient balance, or model unavailable."
+                $errText = "No detailed error returned. Possible causes: network issue, invalid API key, rate limit, insufficient balance, model unavailable, or image input not supported by the selected model."
             }
 
             Write-Output $errText
             Write-Output ""
             Write-Output "Suggestions:"
-            Write-Output "1. For long problems, copy first, then type /clip."
-            Write-Output "2. If errors continue, type /reset."
-            Write-Output "3. If terminal display is messy, type /open."
-            Write-Output "4. If it is slow, type /fast."
-            Write-Output "5. If quality matters more, type /quality."
+            Write-Output "1. For long text problems, copy first, then type /clip."
+            Write-Output "2. For screenshots, use Win + Shift + S first, then type /shot."
+            Write-Output "3. If errors continue, type /reset."
+            Write-Output "4. If terminal display is messy, type /open."
+            Write-Output "5. If it is slow, type /fast."
+            Write-Output "6. If quality matters more, type /quality."
             Write-Output ""
         }
     }
