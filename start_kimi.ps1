@@ -1,5 +1,5 @@
 # start_kimi.ps1
-# Kimi terminal chat for Windows PowerShell
+# ASCII-only PowerShell script to avoid encoding errors on Windows PowerShell 5.1.
 # Do NOT put your API key in this file.
 
 [Console]::InputEncoding = [System.Text.Encoding]::UTF8
@@ -11,7 +11,7 @@ try {
 } catch {}
 
 Write-Output "Kimi terminal chat starter"
-Write-Output "Do NOT paste your API key into GitHub."
+Write-Output "Do NOT put your API key into GitHub."
 Write-Output "Paste your Kimi API Key when asked. It will not be shown on screen."
 Write-Output ""
 
@@ -28,10 +28,10 @@ function New-SystemPrompt {
     )
 
     if ($AnswerMode -eq "code") {
-        return "你是大一C++期末考试和LeetCode简单题助手。用户会用中文问编程题。你只输出完整C++17代码，不要解释，不要Markdown，不要代码围栏。代码要简单，适合大一学生。不要使用复杂模板。"
+        return "You are a C++ exam helper for first-year university students. The user may ask in Chinese. You must output only complete C++17 code. Do not output explanations, Markdown, or code fences. Keep the code simple and suitable for beginners."
     }
 
-    return "你是大一C++期末考试和LeetCode简单题助手。用户会用中文问问题。你要用中文回答，重点帮助用户理解C++基础题、算法题、代码错误。用户要代码时，优先给完整C++17代码，代码要简单，适合大一学生。不要使用复杂模板。题目不完整时，根据已有信息尽量回答。"
+    return "You are a C++ exam and LeetCode easy problem helper for first-year university students. The user may ask in Chinese. Answer in Chinese. Focus on C++ basics, simple algorithms, debugging, and LeetCode easy problems. When the user asks for code, provide complete C++17 code first. Keep the code simple and beginner-friendly."
 }
 
 function Show-Help {
@@ -40,7 +40,7 @@ function Show-Help {
     Write-Output "  /clip      read clipboard and send"
     Write-Output "  /code      code-only mode"
     Write-Output "  /chat      normal explanation mode"
-    Write-Output "  /fast      faster mode, disable thinking"
+    Write-Output "  /fast      faster mode"
     Write-Output "  /quality   quality mode"
     Write-Output "  /reset     clear context"
     Write-Output "  /open      open last answer in Notepad"
@@ -206,7 +206,6 @@ function kimi-chat {
             content = $q
         })
 
-        # Keep context short enough to avoid request failure.
         if ($messages.Count -gt 25) {
             $newMessages = New-Object System.Collections.ArrayList
             [void]$newMessages.Add($messages[0])
@@ -243,8 +242,7 @@ function kimi-chat {
                 -Uri $apiUrl `
                 -Method Post `
                 -Headers $headers `
-                -Body $bodyBytes `
-                -TimeoutSec 120
+                -Body $bodyBytes
 
             if (-not $res.choices -or -not $res.choices[0].message.content) {
                 throw "Empty response from API."
@@ -288,7 +286,7 @@ function kimi-chat {
             }
 
             if ([string]::IsNullOrWhiteSpace($errText)) {
-                $errText = "No detailed error returned. Possible causes: network issue, timeout, invalid API key, rate limit, insufficient balance, or model unavailable."
+                $errText = "No detailed error returned. Possible causes: network issue, invalid API key, rate limit, insufficient balance, or model unavailable."
             }
 
             Write-Output $errText
