@@ -12,50 +12,59 @@
 
 ## 使用方法
 
-在学校电脑里打开 **Windows PowerShell**。
+在学校电脑里打开 **Windows PowerShell**。下面有三套启动方式，按顺序用。
 
-先只用这一条：
+### 1. 快速启动版
+
+适合正常电脑。命令最短，能用就用。
 
 ```powershell
 irm https://raw.githubusercontent.com/lheng2386-png/liheng1/main/k.ps1|iex
 ```
 
-能启动就不用看下面的命令了。
+说明：`irm | iex` 最短，适合临时使用；缺点是脚本不保存到本地，不方便排错。
 
-如果上面那条失败，再用这一条：
+### 2. TLS 兼容版
+
+适合第一条提示 TLS、连接失败、下载失败时使用。
 
 ```powershell
 [Net.ServicePointManager]::SecurityProtocol=3072;iex(iwr -UseBasicParsing https://raw.githubusercontent.com/lheng2386-png/liheng1/main/k.ps1).Content
 ```
 
-大多数情况只需要这两条里的其中一条。它们最终都会运行同一个主脚本 `start_kimi.ps1`，功能一样。
+说明：这条会先强制使用 TLS 1.2，再下载并运行 `k.ps1`。
 
-## 什么时候用哪个命令
+### 3. 排错稳定版
 
-| 情况 | 用哪个 |
-| --- | --- |
-| 正常学校机房电脑 | 用第一条：`irm .../k.ps1\|iex` |
-| 第一条提示 TLS、连接失败、下载失败 | 用第二条：`[Net.ServicePointManager]...` |
-| 想把启动脚本保存到本地，之后重复运行 | 用下面的“保存版” |
+适合学校电脑不稳定、想确认脚本下载成功、想避免旧 `k.ps1`、想手动检查脚本内容时使用。
 
-## 保存版启动方式
-
-一般不用这个。只有你想把启动脚本保存成 `k.ps1`，以后直接运行，才用保存版。
-
-保存版，多行：
+多行版：
 
 ```powershell
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-iwr -UseBasicParsing "https://raw.githubusercontent.com/lheng2386-png/liheng1/main/k.ps1" -OutFile k.ps1
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+Remove-Item .\k.ps1 -ErrorAction SilentlyContinue
+iwr -UseBasicParsing "https://raw.githubusercontent.com/lheng2386-png/liheng1/main/start_kimi.ps1" -OutFile .\k.ps1
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 .\k.ps1
 ```
 
-保存版，一行：
+一行版：
 
 ```powershell
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; iwr -UseBasicParsing "https://raw.githubusercontent.com/lheng2386-png/liheng1/main/k.ps1" -OutFile k.ps1; Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; .\k.ps1
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Remove-Item .\k.ps1 -ErrorAction SilentlyContinue; iwr -UseBasicParsing "https://raw.githubusercontent.com/lheng2386-png/liheng1/main/start_kimi.ps1" -OutFile .\k.ps1; Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; .\k.ps1
 ```
+
+说明：排错稳定版会把真正的主脚本 `start_kimi.ps1` 下载到本地 `k.ps1` 后再运行。这样更方便确认下载是否成功，也能避免误运行旧脚本。
+
+### 紧急备用版
+
+只有在 `ExecutionPolicy` 阻止运行 `.\k.ps1` 时才用这个。平时优先用上面的三套方案。
+
+```powershell
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $u="https://raw.githubusercontent.com/lheng2386-png/liheng1/main/start_kimi.ps1"; $s=(iwr -UseBasicParsing $u).Content; iex $s
+```
+
+说明：紧急备用版不保存脚本文件，直接把主脚本内容读进当前 PowerShell 执行，所以不方便排错。
 
 启动后会提示输入 Kimi API Key。输入时屏幕不会显示内容，这是正常的。
 
@@ -73,7 +82,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 | `/fast` | 快速模式，尽量简洁回答 |
 | `/quality` | 高质量模式，适合复杂题目详细分析 |
 | `/reset` | 清空上下文，但保留当前 PowerShell 进程里的 API Key |
-| `/model` | 查看当前模型、模式、thinking 状态和上下文数量 |
+| `/model` | 查看当前模型、模式、thinking 状态、上下文数量和回答文件路径 |
 | `/open` | 用记事本打开上一次回答保存的 `last_answer.txt` |
 | `/copy` | 把上一次回答复制到剪贴板 |
 | `/clear` | 清屏 |
@@ -284,7 +293,7 @@ RemoveAt
 
 ## 常见问题
 
-### 下载脚本失败
+### GitHub Raw 不能访问或下载脚本失败
 
 可能原因：
 
@@ -292,13 +301,45 @@ RemoveAt
 - 代理或校园网限制。
 - TLS 设置没有生效。
 
-可以重新复制完整启动命令再试一次。
+处理方法：
+
+- 先用“TLS 兼容版”。
+- 还不行就换“排错稳定版”，看 `iwr` 是否能成功下载。
+- 如果学校网络拦截 GitHub Raw，这个工具无法单独绕过网络限制。
+
+### ExecutionPolicy 阻止运行脚本
+
+如果 `.\k.ps1` 被执行策略阻止，先确认命令里有这一行：
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+```
+
+这个设置只对当前 PowerShell 窗口生效，不会永久修改学校电脑策略。
+
+如果仍然被拦，可以临时使用“紧急备用版”。
 
 ### 输入命令后提示 401
 
 HTTP 401 通常表示 API Key 不正确、过期，或没有权限。
 
 退出后重新运行脚本，重新输入正确的 Kimi API Key。
+
+### 输入命令后提示 429
+
+HTTP 429 通常表示请求太频繁、额度限制、账号余额或配额问题。
+
+可以等一会儿再试，或检查 Moonshot/Kimi API 账号额度。
+
+### /clip 提示剪贴板为空
+
+先复制题目文本，再输入：
+
+```text
+/clip
+```
+
+如果复制的是图片，`/clip` 读不到；图片请用 `/shot`，或者手动复制题目文字。
 
 ### 请求很慢
 
@@ -324,6 +365,12 @@ HTTP 401 通常表示 API Key 不正确、过期，或没有权限。
 
 用记事本查看回答。
 
+### last_answer.txt 不能写入当前目录
+
+脚本启动时会测试当前目录是否可写。
+
+如果当前目录不可写，回答会自动保存到 `%TEMP%\last_answer.txt`，启动预检里会显示实际路径。
+
 ### 截图不能读取
 
 先确认是用 `Win + Shift + S` 截图，并且截图后没有复制别的内容。
@@ -333,6 +380,18 @@ HTTP 401 通常表示 API Key 不正确、过期，或没有权限。
 ```text
 /clip
 ```
+
+### 学校电脑不识别 powershell 命令
+
+不用运行 `powershell -ExecutionPolicy Bypass -File .\k.ps1`。
+
+直接在当前 Windows PowerShell 窗口里复制 README 的启动命令即可。
+
+### 为什么不要把 API Key 写进 GitHub
+
+GitHub 公开仓库里的内容任何人都能看到。
+
+如果把真实 API Key 写进脚本或 README，别人可能拿你的额度调用 API，严重时还会产生费用或封禁风险。
 
 ## 安全说明
 

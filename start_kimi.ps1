@@ -2,13 +2,27 @@
 # ASCII-only Windows PowerShell 5.1 script for school Windows 10 terminals.
 # Do NOT put your API key in this file or commit it to GitHub.
 
-[Console]::InputEncoding = [System.Text.Encoding]::UTF8
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$OutputEncoding = [System.Text.Encoding]::UTF8
+$script:KimiApiKey = $null
+$script:ClipboardReady = $false
+$script:TlsReady = $false
+
+try {
+    [Console]::InputEncoding = [System.Text.Encoding]::UTF8
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    $OutputEncoding = [System.Text.Encoding]::UTF8
+} catch {}
 
 try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-} catch {}
+    $script:TlsReady = $true
+} catch {
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = 3072
+        $script:TlsReady = $true
+    } catch {
+        $script:TlsReady = $false
+    }
+}
 
 try {
     Add-Type -AssemblyName System.Windows.Forms
@@ -17,8 +31,6 @@ try {
 } catch {
     $script:ClipboardReady = $false
 }
-
-$script:KimiApiKey = $null
 
 function Protect-SecretText {
     param(
@@ -33,6 +45,7 @@ function Protect-SecretText {
     if (-not [string]::IsNullOrWhiteSpace($script:KimiApiKey)) {
         $safeText = $safeText.Replace($script:KimiApiKey, "[API_KEY_HIDDEN]")
     }
+
     return $safeText
 }
 
@@ -42,6 +55,77 @@ function Write-SafeOutput {
     )
 
     Write-Output (Protect-SecretText -Text $Text)
+}
+
+function Test-DirectoryWritable {
+    param(
+        [string]$Directory
+    )
+
+    try {
+        if ([string]::IsNullOrWhiteSpace($Directory)) {
+            return $false
+        }
+
+        if (-not (Test-Path $Directory)) {
+            return $false
+        }
+
+        $testFile = Join-Path $Directory ("kimi_write_test_" + [Guid]::NewGuid().ToString("N") + ".tmp")
+        [System.IO.File]::WriteAllText($testFile, "test", [System.Text.Encoding]::ASCII)
+        Remove-Item $testFile -Force -ErrorAction SilentlyContinue
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Get-AnswerFilePath {
+    $currentDir = (Get-Location).Path
+
+    if (Test-DirectoryWritable -Directory $currentDir) {
+        return (Join-Path $currentDir "last_answer.txt")
+    }
+
+    $tempDir = $env:TEMP
+    if ([string]::IsNullOrWhiteSpace($tempDir)) {
+        $tempDir = [System.IO.Path]::GetTempPath()
+    }
+
+    return (Join-Path $tempDir "last_answer.txt")
+}
+
+function Show-Preflight {
+    param(
+        [string]$AnswerFilePath
+    )
+
+    Write-Output "Preflight:"
+    Write-Output ("  PowerShell: " + $PSVersionTable.PSVersion.ToString())
+    if ($PSVersionTable.PSVersion.Major -gt 5) {
+        Write-Output "  Note: This script is designed for Windows PowerShell 5.1, but should still run here."
+    }
+
+    if ($script:TlsReady) {
+        Write-Output "  TLS 1.2: OK"
+    } else {
+        Write-Output "  TLS 1.2: failed to set"
+    }
+
+    if ($script:ClipboardReady) {
+        Write-Output "  Clipboard assemblies: OK"
+    } else {
+        Write-Output "  Clipboard assemblies: unavailable. /clip may still try Get-Clipboard; /shot may not work."
+    }
+
+    Write-Output ("  Current directory: " + (Get-Location).Path)
+    Write-Output ("  Answer file: " + $AnswerFilePath)
+    if ((Split-Path -Parent $AnswerFilePath) -ne (Get-Location).Path) {
+        Write-Output "  Current directory is not writable. Answers will be saved in TEMP."
+    } else {
+        Write-Output "  Answer file write test: OK"
+    }
+    Write-Output ""
 }
 
 function Read-KimiApiKey {
@@ -104,7 +188,7 @@ function Show-Help {
     Write-Output "  /reset     Clear context but keep the API key."
     Write-Output "  /open      Open last_answer.txt in Notepad."
     Write-Output "  /copy      Copy the last answer to clipboard."
-    Write-Output "  /model     Show model, mode, thinking status, and context size."
+    Write-Output "  /model     Show model, mode, thinking status, context size, and answer file."
     Write-Output "  /clear     Clear the screen."
     Write-Output "  /help      Show this help."
     Write-Output "  /exit      Exit."
@@ -118,11 +202,9 @@ function Add-SystemMessage {
         [string]$SpeedMode
     )
 
-    $systemPrompt = New-SystemPrompt -AnswerMode $AnswerMode -SpeedMode $SpeedMode
-
     [void]$Messages.Add(@{
         role = "system"
-        content = $systemPrompt
+        content = (New-SystemPrompt -AnswerMode $AnswerMode -SpeedMode $SpeedMode)
     })
 }
 
@@ -171,8 +253,7 @@ function Trim-Messages {
             break
         }
 
-        # Keep the system prompt at index 0. Remove the oldest non-system item.
-        # Do not assign a sliced array back to $Messages; that creates a fixed-size array.
+        # Keep the system prompt at index 0. Remove old non-system messages in place.
         $Messages.RemoveAt(1)
     }
 }
@@ -184,7 +265,10 @@ function Remove-LastUserMessage {
 
     try {
         if ($Messages.Count -gt 1) {
-            $Messages.RemoveAt($Messages.Count - 1)
+            $lastIndex = $Messages.Count - 1
+            if ($Messages[$lastIndex].role -eq "user") {
+                $Messages.RemoveAt($lastIndex)
+            }
         }
     } catch {
         Write-Output "Context cleanup skipped."
@@ -192,12 +276,8 @@ function Remove-LastUserMessage {
 }
 
 function Get-ClipboardTextSafe {
-    if (-not $script:ClipboardReady) {
-        return $null
-    }
-
     try {
-        if ([System.Windows.Forms.Clipboard]::ContainsText()) {
+        if ($script:ClipboardReady -and [System.Windows.Forms.Clipboard]::ContainsText()) {
             return [System.Windows.Forms.Clipboard]::GetText()
         }
     } catch {}
@@ -222,18 +302,11 @@ function Set-ClipboardTextSafe {
         return $false
     }
 
-    if (-not $script:ClipboardReady) {
-        try {
-            Set-Clipboard -Value $Text -ErrorAction Stop
-            return $true
-        } catch {
-            return $false
-        }
-    }
-
     try {
-        [System.Windows.Forms.Clipboard]::SetText($Text)
-        return $true
+        if ($script:ClipboardReady) {
+            [System.Windows.Forms.Clipboard]::SetText($Text)
+            return $true
+        }
     } catch {}
 
     try {
@@ -266,6 +339,7 @@ function Get-ClipboardImageDataUrl {
             if ($bytes.Length -gt 5242880) {
                 return "IMAGE_TOO_LARGE"
             }
+
             $base64 = [Convert]::ToBase64String($bytes)
             return "data:image/png;base64,$base64"
         } finally {
@@ -282,29 +356,32 @@ function New-RequestBodyJson {
         [string]$Model,
         [System.Collections.ArrayList]$Messages,
         [string]$SpeedMode,
-        [int]$MaxTokens
+        [int]$MaxTokens,
+        [bool]$IncludeThinking
     )
 
-    $bodyObj = @{
-        model = $Model
-        messages = $Messages
-        max_tokens = $MaxTokens
-    }
-
-    if ($SpeedMode -eq "fast") {
-        $bodyObj.thinking = @{
-            type = "disabled"
-        }
-    } else {
-        $bodyObj.thinking = @{
-            type = "enabled"
-        }
-    }
-
     try {
-        return ($bodyObj | ConvertTo-Json -Depth 20)
+        $bodyObj = @{
+            model = $Model
+            messages = $Messages
+            max_tokens = $MaxTokens
+        }
+
+        if ($IncludeThinking) {
+            if ($SpeedMode -eq "fast") {
+                $bodyObj.thinking = @{
+                    type = "disabled"
+                }
+            } else {
+                $bodyObj.thinking = @{
+                    type = "enabled"
+                }
+            }
+        }
+
+        return ($bodyObj | ConvertTo-Json -Depth 30)
     } catch {
-        throw "Request body build failed: JSON serialization error. $($_.Exception.Message)"
+        throw "Request body build failed."
     }
 }
 
@@ -350,6 +427,31 @@ function Get-HttpErrorText {
     }
 }
 
+function Write-RequestError {
+    param(
+        [hashtable]$ErrorInfo
+    )
+
+    if ($null -ne $ErrorInfo.StatusCode) {
+        Write-Output ("HTTP status: " + $ErrorInfo.StatusCode + " " + $ErrorInfo.StatusDescription)
+    }
+
+    Write-Output "Error detail:"
+    Write-SafeOutput $ErrorInfo.Detail
+
+    if ($ErrorInfo.StatusCode -eq 401) {
+        Write-Output "Tip: API key is invalid, expired, or has no permission."
+    } elseif ($ErrorInfo.StatusCode -eq 429) {
+        Write-Output "Tip: Rate limit, quota, or account balance issue."
+    } elseif ($ErrorInfo.StatusCode -eq 400) {
+        Write-Output "Tip: Request body format issue. It may be image format, content length, or thinking parameter."
+    } elseif ($ErrorInfo.Detail -match "timed out|timeout|NameResolution|Unable to connect|connection|DNS|proxy") {
+        Write-Output "Tip: Check campus network, proxy, GitHub Raw, and api.moonshot.cn access."
+    } else {
+        Write-Output "Tip: Check API key, campus network, proxy, GitHub Raw, and api.moonshot.cn."
+    }
+}
+
 function Save-LastAnswer {
     param(
         [string]$Path,
@@ -362,6 +464,7 @@ function Save-LastAnswer {
         return $true
     } catch {
         Write-Output "Failed to save last_answer.txt."
+        Write-Output ("Path: " + $Path)
         return $false
     }
 }
@@ -391,10 +494,17 @@ function Invoke-KimiRequest {
         [string]$Model,
         [System.Collections.ArrayList]$Messages,
         [string]$SpeedMode,
-        [int]$MaxTokens
+        [int]$MaxTokens,
+        [bool]$IncludeThinking
     )
 
-    $json = New-RequestBodyJson -Model $Model -Messages $Messages -SpeedMode $SpeedMode -MaxTokens $MaxTokens
+    $json = New-RequestBodyJson `
+        -Model $Model `
+        -Messages $Messages `
+        -SpeedMode $SpeedMode `
+        -MaxTokens $MaxTokens `
+        -IncludeThinking $IncludeThinking
+
     $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($json)
 
     $headers = @{
@@ -411,17 +521,84 @@ function Invoke-KimiRequest {
         -ErrorAction Stop
 }
 
-function kimi-chat {
-    Read-KimiApiKey
+function Invoke-KimiRequestWithRetry {
+    param(
+        [string]$ApiUrl,
+        [string]$ApiKey,
+        [string]$Model,
+        [System.Collections.ArrayList]$Messages,
+        [string]$SpeedMode,
+        [int]$MaxTokens
+    )
 
+    try {
+        $response = Invoke-KimiRequest `
+            -ApiUrl $ApiUrl `
+            -ApiKey $ApiKey `
+            -Model $Model `
+            -Messages $Messages `
+            -SpeedMode $SpeedMode `
+            -MaxTokens $MaxTokens `
+            -IncludeThinking $true
+
+        return @{
+            Success = $true
+            Response = $response
+            Error = $null
+            Warning = $null
+        }
+    } catch {
+        $firstError = Get-HttpErrorText -ErrorRecord $_
+        $mayBeThinkingProblem = ($firstError.StatusCode -eq 400 -or $firstError.Detail -match "thinking")
+
+        if ($mayBeThinkingProblem) {
+            try {
+                $response = Invoke-KimiRequest `
+                    -ApiUrl $ApiUrl `
+                    -ApiKey $ApiKey `
+                    -Model $Model `
+                    -Messages $Messages `
+                    -SpeedMode $SpeedMode `
+                    -MaxTokens $MaxTokens `
+                    -IncludeThinking $false
+
+                return @{
+                    Success = $true
+                    Response = $response
+                    Error = $null
+                    Warning = "Thinking parameter may not be accepted by this endpoint. Retried without it."
+                }
+            } catch {
+                return @{
+                    Success = $false
+                    Response = $null
+                    Error = (Get-HttpErrorText -ErrorRecord $_)
+                    Warning = $null
+                }
+            }
+        }
+
+        return @{
+            Success = $false
+            Response = $null
+            Error = $firstError
+            Warning = $null
+        }
+    }
+}
+
+function kimi-chat {
     $apiUrl = "https://api.moonshot.cn/v1/chat/completions"
     $model = "kimi-k2.6"
     $speedMode = "quality"
     $answerMode = "chat"
     $maxTokens = 4000
     $maxMessages = 25
-    $lastAnswerFile = Join-Path (Get-Location) "last_answer.txt"
+    $lastAnswerFile = Get-AnswerFilePath
     $lastAnswer = ""
+
+    Show-Preflight -AnswerFilePath $lastAnswerFile
+    Read-KimiApiKey
 
     $messages = New-Object System.Collections.ArrayList
     Add-SystemMessage -Messages $messages -AnswerMode $answerMode -SpeedMode $speedMode
@@ -468,10 +645,11 @@ function kimi-chat {
         }
 
         if ($cmd -eq "/model") {
-            Write-Output "Model: $model"
-            Write-Output "Answer mode: $answerMode"
-            Write-Output "Thinking: $speedMode"
-            Write-Output "Context messages: $($messages.Count)"
+            Write-Output ("Model: " + $model)
+            Write-Output ("Answer mode: " + $answerMode)
+            Write-Output ("Thinking mode: " + $speedMode)
+            Write-Output ("Context messages: " + $messages.Count)
+            Write-Output ("Answer file: " + $lastAnswerFile)
             continue
         }
 
@@ -544,8 +722,7 @@ function kimi-chat {
 
             $q = $clipText
             Write-Output "Clipboard text loaded. Sending to Kimi..."
-        }
-        elseif ($cmd -eq "/shot") {
+        } elseif ($cmd -eq "/shot") {
             $dataUrl = Get-ClipboardImageDataUrl
 
             if ($dataUrl -eq "IMAGE_TOO_LARGE") {
@@ -554,8 +731,7 @@ function kimi-chat {
             }
 
             if ([string]::IsNullOrWhiteSpace($dataUrl)) {
-                Write-Output "Clipboard has no image. Use Win + Shift + S first, then type /shot."
-                Write-Output "If this school computer blocks image clipboard access, /clip still works for copied text."
+                Write-Output "Clipboard has no image. Use Win + Shift + S first, then type /shot. If this lab blocks image clipboard access, use /clip instead."
                 continue
             }
 
@@ -589,8 +765,7 @@ function kimi-chat {
 
             $addedUserMessage = $true
             Write-Output "Screenshot loaded. Sending to Kimi..."
-        }
-        else {
+        } else {
             $q = $cmd
         }
 
@@ -603,60 +778,19 @@ function kimi-chat {
 
         Trim-Messages -Messages $messages -MaxCount $maxMessages
 
-        try {
-            $res = Invoke-KimiRequest `
-                -ApiUrl $apiUrl `
-                -ApiKey $script:KimiApiKey `
-                -Model $model `
-                -Messages $messages `
-                -SpeedMode $speedMode `
-                -MaxTokens $maxTokens
+        $result = Invoke-KimiRequestWithRetry `
+            -ApiUrl $apiUrl `
+            -ApiKey $script:KimiApiKey `
+            -Model $model `
+            -Messages $messages `
+            -SpeedMode $speedMode `
+            -MaxTokens $maxTokens
 
-            if (-not $res.choices -or -not $res.choices[0].message.content) {
-                throw "Empty response from API."
-            }
-
-            $answer = $res.choices[0].message.content
-            $lastAnswer = $answer
-
-            Write-Output ""
-            Write-Output "Kimi:"
-            Write-Output $answer
-            Write-Output ""
-
-            [void](Save-LastAnswer -Path $lastAnswerFile -Answer $answer)
-
-            [void]$messages.Add(@{
-                role = "assistant"
-                content = $answer
-            })
-        }
-        catch {
+        if (-not $result.Success) {
             Write-Output ""
             Write-Output "Request failed. The last user message has been removed from context."
             Remove-LastUserMessage -Messages $messages
-
-            $message = $_.Exception.Message
-
-            if ($message -like "Request body build failed:*") {
-                Write-Output $message
-            } else {
-                $err = Get-HttpErrorText -ErrorRecord $_
-
-                if ($null -ne $err.StatusCode) {
-                    Write-Output "HTTP status: $($err.StatusCode) $($err.StatusDescription)"
-                }
-
-                Write-Output "Error detail:"
-                Write-Output $err.Detail
-
-                if ($err.StatusCode -eq 401) {
-                    Write-Output "Tip: HTTP 401 usually means the API key is invalid or expired."
-                } else {
-                    Write-Output "Tip: Check GitHub Raw download, api.moonshot.cn, proxy settings, and the campus network."
-                }
-            }
-
+            Write-RequestError -ErrorInfo $result.Error
             Write-Output ""
             Write-Output "Suggestions:"
             Write-Output "1. For long text problems, copy first, then type /clip."
@@ -665,7 +799,34 @@ function kimi-chat {
             Write-Output "4. If terminal Chinese display is messy, type /open."
             Write-Output "5. Use /fast for short answers or /quality for hard problems."
             Write-Output ""
+            continue
         }
+
+        if (-not [string]::IsNullOrWhiteSpace($result.Warning)) {
+            Write-Output $result.Warning
+        }
+
+        $res = $result.Response
+        if (-not $res.choices -or -not $res.choices[0].message.content) {
+            Write-Output "Empty response from API. The last user message has been removed from context."
+            Remove-LastUserMessage -Messages $messages
+            continue
+        }
+
+        $answer = $res.choices[0].message.content
+        $lastAnswer = $answer
+
+        Write-Output ""
+        Write-Output "Kimi:"
+        Write-Output $answer
+        Write-Output ""
+
+        [void](Save-LastAnswer -Path $lastAnswerFile -Answer $answer)
+
+        [void]$messages.Add(@{
+            role = "assistant"
+            content = $answer
+        })
     }
 }
 
@@ -674,6 +835,6 @@ try {
 } catch {
     Write-Output ""
     Write-Output "Fatal error. The script stopped safely."
-    Write-Output (Protect-SecretText -Text $_.Exception.Message)
+    Write-SafeOutput $_.Exception.Message
     Write-Output "You can restart PowerShell and run the launch command again."
 }
