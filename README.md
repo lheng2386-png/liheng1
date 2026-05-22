@@ -12,17 +12,27 @@
 
 ## 使用方法
 
-在学校电脑里打开 **Windows PowerShell**，优先复制下面这个短命令运行。
+在学校电脑里打开 **Windows PowerShell**，优先复制下面这个最短命令运行。
 
-推荐短命令：
+最短版：
 
 ```powershell
-[Net.ServicePointManager]::SecurityProtocol=3072;iex(iwr -UseBasicParsing https://raw.githubusercontent.com/lheng2386-png/liheng1/main/start_kimi.ps1).Content
+irm https://raw.githubusercontent.com/lheng2386-png/liheng1/main/k.ps1|iex
 ```
 
-这个命令会直接从 GitHub Raw 读取 `start_kimi.ps1` 并在当前 PowerShell 窗口运行，不需要记 `-OutFile k.ps1`、`Set-ExecutionPolicy`、`.\k.ps1`。
+这个命令会先读取仓库里的短启动器 `k.ps1`，再自动加载真正的主脚本 `start_kimi.ps1`。
 
-短命令和下面的备用命令运行的是同一个脚本，功能效果一样。区别是：短命令不保存脚本文件，备用命令会先下载成 `k.ps1` 再运行。
+如果最短版因为学校电脑的 PowerShell/TLS 设置失败，再试下面这个兼容短命令。
+
+兼容短命令：
+
+```powershell
+[Net.ServicePointManager]::SecurityProtocol=3072;iex(iwr -UseBasicParsing https://raw.githubusercontent.com/lheng2386-png/liheng1/main/k.ps1).Content
+```
+
+这两个短命令都不需要记 `-OutFile k.ps1`、`Set-ExecutionPolicy`、`.\k.ps1`。
+
+短命令和下面的备用命令最终运行的是同一个主脚本，功能效果一样。区别是：短命令不保存主脚本文件，备用命令会先下载成 `k.ps1` 再运行。
 
 如果短命令不能用，再使用下面的备用方式。
 
@@ -30,7 +40,7 @@
 
 ```powershell
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-iwr -UseBasicParsing "https://raw.githubusercontent.com/lheng2386-png/liheng1/main/start_kimi.ps1" -OutFile k.ps1
+iwr -UseBasicParsing "https://raw.githubusercontent.com/lheng2386-png/liheng1/main/k.ps1" -OutFile k.ps1
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\k.ps1
 ```
@@ -38,7 +48,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 备用一行版：
 
 ```powershell
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; iwr -UseBasicParsing "https://raw.githubusercontent.com/lheng2386-png/liheng1/main/start_kimi.ps1" -OutFile k.ps1; Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; .\k.ps1
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; iwr -UseBasicParsing "https://raw.githubusercontent.com/lheng2386-png/liheng1/main/k.ps1" -OutFile k.ps1; Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; .\k.ps1
 ```
 
 启动后会提示输入 Kimi API Key。输入时屏幕不会显示内容，这是正常的。
