@@ -12,9 +12,21 @@
 
 ## 使用方法
 
-在学校电脑里打开 **Windows PowerShell**，直接复制下面命令运行。
+在学校电脑里打开 **Windows PowerShell**，优先复制下面这个短命令运行。
 
-多行版：
+推荐短命令：
+
+```powershell
+[Net.ServicePointManager]::SecurityProtocol=3072;iex(iwr -UseBasicParsing https://raw.githubusercontent.com/lheng2386-png/liheng1/main/start_kimi.ps1).Content
+```
+
+这个命令会直接从 GitHub Raw 读取 `start_kimi.ps1` 并在当前 PowerShell 窗口运行，不需要记 `-OutFile k.ps1`、`Set-ExecutionPolicy`、`.\k.ps1`。
+
+短命令和下面的备用命令运行的是同一个脚本，功能效果一样。区别是：短命令不保存脚本文件，备用命令会先下载成 `k.ps1` 再运行。
+
+如果短命令不能用，再使用下面的备用方式。
+
+备用多行版：
 
 ```powershell
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -23,7 +35,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\k.ps1
 ```
 
-一行版：
+备用一行版：
 
 ```powershell
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; iwr -UseBasicParsing "https://raw.githubusercontent.com/lheng2386-png/liheng1/main/start_kimi.ps1" -OutFile k.ps1; Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; .\k.ps1
