@@ -1,6 +1,6 @@
 # start_kimi.ps1
-# ASCII-only PowerShell script to avoid encoding errors on Windows PowerShell 5.1.
-# Do NOT put your API key in this file.
+# ASCII-only Windows PowerShell 5.1 script for school Windows 10 terminals.
+# Do NOT put your API key in this file or commit it to GitHub.
 
 [Console]::InputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -15,61 +15,117 @@ try {
     Add-Type -AssemblyName System.Drawing
 } catch {}
 
-Write-Output "Kimi terminal chat starter"
-Write-Output "Do NOT put your API key into GitHub."
-Write-Output "Paste your Kimi API Key when asked. It will not be shown on screen."
-Write-Output ""
+$script:KimiApiKey = $null
 
-if (-not $env:KIMI_API_KEY) {
+function Read-KimiApiKey {
+    if (-not [string]::IsNullOrWhiteSpace($script:KimiApiKey)) {
+        return
+    }
+
+    Write-Output "Kimi terminal chat starter"
+    Write-Output "Do NOT put your API key into GitHub."
+    Write-Output "Paste your Kimi API Key when asked. It will not be shown on screen."
+    Write-Output ""
+
     $secureKey = Read-Host "Enter Kimi API Key" -AsSecureString
     $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)
-    $env:KIMI_API_KEY = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
-    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)
+    try {
+        $script:KimiApiKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
+    } finally {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)
+    }
+
+    if ([string]::IsNullOrWhiteSpace($script:KimiApiKey)) {
+        Write-Output "ERROR: API key is empty. Restart the script and enter a valid key."
+        exit 1
+    }
 }
 
 function New-SystemPrompt {
     param(
-        [string]$AnswerMode
+        [string]$AnswerMode,
+        [string]$SpeedMode
     )
 
+    $base = "You are a Kimi API assistant used in a Windows 10 school computer lab for C++ and algorithm review. The user may ask in Chinese. Always answer in Chinese unless code-only mode is active. Never reveal secrets."
+
     if ($AnswerMode -eq "code") {
-        return "You are a C++ exam helper for first-year university students. The user may ask in Chinese. You must output only complete C++17 code. Do not output explanations, Markdown, or code fences. Keep the code simple and suitable for beginners."
+        return "$base Code-only mode is active. Output only one complete C++17 program. Do not explain. Do not use Markdown. Do not use code fences. Do not add text before or after the code. Keep the code suitable for online judges and beginner-friendly when possible."
     }
 
-    return "You are a C++ exam and LeetCode easy problem helper for first-year university students. The user may ask in Chinese. Answer in Chinese. Focus on C++ basics, simple algorithms, debugging, and LeetCode easy problems. When the user asks for code, provide complete C++17 code first. Keep the code simple and beginner-friendly."
+    if ($SpeedMode -eq "fast") {
+        return "$base Fast mode is active. Keep answers concise. For algorithm problems, give the key idea and complete C++17 code when useful."
+    }
+
+    return "$base Normal chat mode is active. Explain ideas, key points, debugging steps, and C++17 code when useful. Be beginner-friendly and practical for exam or online judge practice."
 }
 
 function Show-Help {
     Write-Output ""
     Write-Output "Commands:"
-    Write-Output "  /clip      read clipboard text and send"
-    Write-Output "  /shot      read screenshot image from clipboard and ask about it"
-    Write-Output "  /code      code-only mode"
-    Write-Output "  /chat      normal explanation mode"
-    Write-Output "  /fast      faster mode, disable thinking"
-    Write-Output "  /quality   quality mode"
-    Write-Output "  /reset     clear context"
-    Write-Output "  /open      open last answer in Notepad"
-    Write-Output "  /copy      copy last answer to clipboard"
-    Write-Output "  /model     show current model and mode"
-    Write-Output "  /clear     clear screen"
-    Write-Output "  /help      show commands"
-    Write-Output "  /exit      exit"
+    Write-Output "  /clip      Read clipboard text and send it."
+    Write-Output "  /shot      Read clipboard image from Win+Shift+S and send it with a question."
+    Write-Output "  /code      Switch to code-only mode. Answers are complete C++17 code only."
+    Write-Output "  /chat      Switch back to normal Chinese explanation mode."
+    Write-Output "  /fast      Fast mode. Disable thinking when the API supports it."
+    Write-Output "  /quality   Quality mode. Enable thinking when the API supports it."
+    Write-Output "  /reset     Clear context but keep the API key."
+    Write-Output "  /open      Open last_answer.txt in Notepad."
+    Write-Output "  /copy      Copy the last answer to clipboard."
+    Write-Output "  /model     Show model, mode, thinking status, and context size."
+    Write-Output "  /clear     Clear the screen."
+    Write-Output "  /help      Show this help."
+    Write-Output "  /exit      Exit."
     Write-Output ""
 }
 
 function Add-SystemMessage {
     param(
         [System.Collections.ArrayList]$Messages,
-        [string]$AnswerMode
+        [string]$AnswerMode,
+        [string]$SpeedMode
     )
 
-    $systemPrompt = New-SystemPrompt -AnswerMode $AnswerMode
+    $systemPrompt = New-SystemPrompt -AnswerMode $AnswerMode -SpeedMode $SpeedMode
 
     [void]$Messages.Add(@{
         role = "system"
         content = $systemPrompt
     })
+}
+
+function Reset-Messages {
+    param(
+        [System.Collections.ArrayList]$Messages,
+        [string]$AnswerMode,
+        [string]$SpeedMode
+    )
+
+    $Messages.Clear()
+    Add-SystemMessage -Messages $Messages -AnswerMode $AnswerMode -SpeedMode $SpeedMode
+}
+
+function Update-SystemMessage {
+    param(
+        [System.Collections.ArrayList]$Messages,
+        [string]$AnswerMode,
+        [string]$SpeedMode
+    )
+
+    $systemPrompt = New-SystemPrompt -AnswerMode $AnswerMode -SpeedMode $SpeedMode
+
+    if ($Messages.Count -eq 0) {
+        [void]$Messages.Add(@{
+            role = "system"
+            content = $systemPrompt
+        })
+        return
+    }
+
+    $Messages[0] = @{
+        role = "system"
+        content = $systemPrompt
+    }
 }
 
 function Trim-Messages {
@@ -79,12 +135,17 @@ function Trim-Messages {
     )
 
     while ($Messages.Count -gt $MaxCount) {
-        # Keep system prompt at index 0, remove oldest non-system message.
+        if ($Messages.Count -le 2) {
+            break
+        }
+
+        # Keep the system prompt at index 0. Remove the oldest non-system item.
+        # Do not assign a sliced array back to $Messages; that creates a fixed-size array.
         $Messages.RemoveAt(1)
     }
 }
 
-function Remove-LastMessage {
+function Remove-LastUserMessage {
     param(
         [System.Collections.ArrayList]$Messages
     )
@@ -98,48 +159,202 @@ function Remove-LastMessage {
     }
 }
 
-function Get-ClipboardImageDataUrl {
+function Get-ClipboardTextSafe {
     try {
-        $img = [System.Windows.Forms.Clipboard]::GetImage()
+        if ([System.Windows.Forms.Clipboard]::ContainsText()) {
+            return [System.Windows.Forms.Clipboard]::GetText()
+        }
+    } catch {}
 
-        if ($null -eq $img) {
+    try {
+        $value = Get-Clipboard -ErrorAction Stop
+        if ($null -eq $value) {
             return $null
         }
-
-        $ms = New-Object System.IO.MemoryStream
-        $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
-        $bytes = $ms.ToArray()
-        $base64 = [Convert]::ToBase64String($bytes)
-
-        return "data:image/png;base64,$base64"
+        return ($value -join "`n")
     } catch {
         return $null
     }
 }
 
-function kimi-chat {
-    if (-not $env:KIMI_API_KEY) {
-        Write-Output "ERROR: KIMI_API_KEY is not set."
-        return
+function Set-ClipboardTextSafe {
+    param(
+        [string]$Text
+    )
+
+    try {
+        [System.Windows.Forms.Clipboard]::SetText($Text)
+        return $true
+    } catch {}
+
+    try {
+        Set-Clipboard -Value $Text -ErrorAction Stop
+        return $true
+    } catch {
+        return $false
     }
+}
+
+function Get-ClipboardImageDataUrl {
+    try {
+        if (-not [System.Windows.Forms.Clipboard]::ContainsImage()) {
+            return $null
+        }
+
+        $img = [System.Windows.Forms.Clipboard]::GetImage()
+        if ($null -eq $img) {
+            return $null
+        }
+
+        $ms = New-Object System.IO.MemoryStream
+        try {
+            $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+            $bytes = $ms.ToArray()
+            $base64 = [Convert]::ToBase64String($bytes)
+            return "data:image/png;base64,$base64"
+        } finally {
+            $ms.Dispose()
+            $img.Dispose()
+        }
+    } catch {
+        return $null
+    }
+}
+
+function New-RequestBodyJson {
+    param(
+        [string]$Model,
+        [System.Collections.ArrayList]$Messages,
+        [string]$SpeedMode,
+        [int]$MaxTokens
+    )
+
+    $bodyObj = @{
+        model = $Model
+        messages = $Messages
+        max_tokens = $MaxTokens
+    }
+
+    if ($SpeedMode -eq "fast") {
+        $bodyObj.thinking = @{
+            type = "disabled"
+        }
+    } else {
+        $bodyObj.thinking = @{
+            type = "enabled"
+        }
+    }
+
+    try {
+        return ($bodyObj | ConvertTo-Json -Depth 20)
+    } catch {
+        throw "Request body build failed: JSON serialization error. $($_.Exception.Message)"
+    }
+}
+
+function Get-HttpErrorText {
+    param(
+        [object]$ErrorRecord
+    )
+
+    $statusCode = $null
+    $statusDescription = $null
+    $detail = $null
+
+    try {
+        if ($ErrorRecord.Exception.Response) {
+            $statusCode = [int]$ErrorRecord.Exception.Response.StatusCode
+            $statusDescription = $ErrorRecord.Exception.Response.StatusDescription
+
+            try {
+                $stream = $ErrorRecord.Exception.Response.GetResponseStream()
+                $reader = New-Object System.IO.StreamReader($stream, [System.Text.Encoding]::UTF8)
+                $detail = $reader.ReadToEnd()
+                $reader.Dispose()
+            } catch {
+                $detail = $ErrorRecord.Exception.Message
+            }
+        } else {
+            $detail = $ErrorRecord.Exception.Message
+        }
+    } catch {
+        $detail = $ErrorRecord.Exception.Message
+    }
+
+    if ([string]::IsNullOrWhiteSpace($detail)) {
+        $detail = "No detailed error returned."
+    }
+
+    return @{
+        StatusCode = $statusCode
+        StatusDescription = $statusDescription
+        Detail = $detail
+    }
+}
+
+function Save-LastAnswer {
+    param(
+        [string]$Path,
+        [string]$Answer
+    )
+
+    try {
+        $utf8Bom = New-Object System.Text.UTF8Encoding($true)
+        [System.IO.File]::WriteAllText($Path, $Answer, $utf8Bom)
+        return $true
+    } catch {
+        Write-Output "Failed to save last_answer.txt."
+        return $false
+    }
+}
+
+function Invoke-KimiRequest {
+    param(
+        [string]$ApiUrl,
+        [string]$ApiKey,
+        [string]$Model,
+        [System.Collections.ArrayList]$Messages,
+        [string]$SpeedMode,
+        [int]$MaxTokens
+    )
+
+    $json = New-RequestBodyJson -Model $Model -Messages $Messages -SpeedMode $SpeedMode -MaxTokens $MaxTokens
+    $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+
+    $headers = @{
+        Authorization = "Bearer $ApiKey"
+    }
+
+    return Invoke-RestMethod `
+        -Uri $ApiUrl `
+        -Method Post `
+        -Headers $headers `
+        -ContentType "application/json; charset=utf-8" `
+        -Body $bodyBytes `
+        -ErrorAction Stop
+}
+
+function kimi-chat {
+    Read-KimiApiKey
 
     $apiUrl = "https://api.moonshot.cn/v1/chat/completions"
     $model = "kimi-k2.6"
     $speedMode = "quality"
     $answerMode = "chat"
     $maxTokens = 4000
-    $lastAnswerFile = "$PWD\kimi_last_answer.txt"
+    $maxMessages = 25
+    $lastAnswerFile = Join-Path (Get-Location) "last_answer.txt"
     $lastAnswer = ""
 
     $messages = New-Object System.Collections.ArrayList
-    Add-SystemMessage -Messages $messages -AnswerMode $answerMode
+    Add-SystemMessage -Messages $messages -AnswerMode $answerMode -SpeedMode $speedMode
 
     Write-Output ""
     Write-Output "Kimi chat started."
     Write-Output "Short question: type directly."
     Write-Output "Long text problem: copy it first, then type /clip."
     Write-Output "Screenshot problem: use Win + Shift + S, then type /shot."
-    Write-Output "Recommended: use /code before asking for complete C++ code."
+    Write-Output "Use /code for online judge C++17 code-only answers."
     Show-Help
 
     while ($true) {
@@ -167,36 +382,37 @@ function kimi-chat {
 
         if ($cmd -eq "/model") {
             Write-Output "Model: $model"
-            Write-Output "Speed mode: $speedMode"
             Write-Output "Answer mode: $answerMode"
+            Write-Output "Thinking: $speedMode"
+            Write-Output "Context messages: $($messages.Count)"
             continue
         }
 
         if ($cmd -eq "/fast") {
             $speedMode = "fast"
-            Write-Output "Switched to fast mode."
+            Update-SystemMessage -Messages $messages -AnswerMode $answerMode -SpeedMode $speedMode
+            Write-Output "Switched to fast mode. Thinking disabled when supported."
             continue
         }
 
         if ($cmd -eq "/quality") {
             $speedMode = "quality"
-            Write-Output "Switched to quality mode."
+            Update-SystemMessage -Messages $messages -AnswerMode $answerMode -SpeedMode $speedMode
+            Write-Output "Switched to quality mode. Thinking enabled when supported."
             continue
         }
 
         if ($cmd -eq "/code") {
             $answerMode = "code"
-            $messages.Clear()
-            Add-SystemMessage -Messages $messages -AnswerMode $answerMode
-            Write-Output "Switched to code-only mode. Context cleared."
+            Update-SystemMessage -Messages $messages -AnswerMode $answerMode -SpeedMode $speedMode
+            Write-Output "Switched to code-only mode."
             continue
         }
 
         if ($cmd -eq "/chat") {
             $answerMode = "chat"
-            $messages.Clear()
-            Add-SystemMessage -Messages $messages -AnswerMode $answerMode
-            Write-Output "Switched to normal chat mode. Context cleared."
+            Update-SystemMessage -Messages $messages -AnswerMode $answerMode -SpeedMode $speedMode
+            Write-Output "Switched to normal chat mode."
             continue
         }
 
@@ -210,86 +426,77 @@ function kimi-chat {
         }
 
         if ($cmd -eq "/copy") {
-            if ([string]::IsNullOrWhiteSpace($lastAnswer)) {
-                Write-Output "No answer to copy yet."
-            } else {
+            $copyText = $lastAnswer
+            if ([string]::IsNullOrWhiteSpace($copyText) -and (Test-Path $lastAnswerFile)) {
                 try {
-                    Set-Clipboard -Value $lastAnswer
-                    Write-Output "Last answer copied to clipboard."
-                } catch {
-                    Write-Output "Failed to copy to clipboard."
-                }
+                    $copyText = [System.IO.File]::ReadAllText($lastAnswerFile, [System.Text.Encoding]::UTF8)
+                } catch {}
+            }
+
+            if ([string]::IsNullOrWhiteSpace($copyText)) {
+                Write-Output "No answer to copy yet."
+            } elseif (Set-ClipboardTextSafe -Text $copyText) {
+                Write-Output "Last answer copied to clipboard."
+            } else {
+                Write-Output "Failed to copy to clipboard."
             }
             continue
         }
 
         if ($cmd -eq "/reset") {
-            $messages.Clear()
-            Add-SystemMessage -Messages $messages -AnswerMode $answerMode
-            Write-Output "Context cleared."
+            Reset-Messages -Messages $messages -AnswerMode $answerMode -SpeedMode $speedMode
+            Write-Output "Context cleared. API key is still kept in this PowerShell process."
             continue
         }
 
         $addedUserMessage = $false
 
         if ($cmd -eq "/clip") {
-            try {
-                $clipText = (Get-Clipboard) -join "`n"
+            $clipText = Get-ClipboardTextSafe
 
-                if ([string]::IsNullOrWhiteSpace($clipText)) {
-                    Write-Output "Clipboard is empty. Copy the problem first, then type /clip."
-                    continue
-                }
-
-                $q = $clipText
-                Write-Output "Clipboard text loaded. Sending to Kimi..."
-            }
-            catch {
-                Write-Output "Failed to read clipboard text. You can type a short question directly."
+            if ([string]::IsNullOrWhiteSpace($clipText)) {
+                Write-Output "Clipboard is empty. Copy the problem text first, then type /clip."
                 continue
             }
+
+            $q = $clipText
+            Write-Output "Clipboard text loaded. Sending to Kimi..."
         }
         elseif ($cmd -eq "/shot") {
-            try {
-                $dataUrl = Get-ClipboardImageDataUrl
+            $dataUrl = Get-ClipboardImageDataUrl
 
-                if ([string]::IsNullOrWhiteSpace($dataUrl)) {
-                    Write-Output "Clipboard has no image. Use Win + Shift + S first, then type /shot."
-                    continue
-                }
-
-                $imgQuestion = Read-Host "Question for this screenshot"
-
-                if ([string]::IsNullOrWhiteSpace($imgQuestion)) {
-                    $imgQuestion = "Please read this screenshot. If it is a C++ or algorithm problem, explain the problem in Chinese and give a beginner-friendly C++17 solution."
-                }
-
-                $userContent = @(
-                    @{
-                        type = "text"
-                        text = $imgQuestion
-                    },
-                    @{
-                        type = "image_url"
-                        image_url = @{
-                            url = $dataUrl
-                        }
-                    }
-                )
-
-                [void]$messages.Add(@{
-                    role = "user"
-                    content = $userContent
-                })
-
-                $addedUserMessage = $true
-                Write-Output "Screenshot loaded. Sending to Kimi..."
-            }
-            catch {
-                Write-Output "Failed to read screenshot from clipboard."
-                Write-Output $_.Exception.Message
+            if ([string]::IsNullOrWhiteSpace($dataUrl)) {
+                Write-Output "Clipboard has no image. Use Win + Shift + S first, then type /shot."
+                Write-Output "If this school computer blocks image clipboard access, /clip still works for copied text."
                 continue
             }
+
+            $imgQuestion = Read-Host "Question for this screenshot"
+
+            if ([string]::IsNullOrWhiteSpace($imgQuestion)) {
+                $imgQuestion = "Please solve this problem. If it is a C++ or algorithm problem, explain in Chinese and provide a beginner-friendly C++17 solution."
+            }
+
+            $userContent = @(
+                @{
+                    type = "text"
+                    text = $imgQuestion
+                },
+                @{
+                    type = "image_url"
+                    image_url = @{
+                        url = $dataUrl
+                    }
+                }
+            )
+
+            [void]$messages.Add(@{
+                role = "user"
+                content = $userContent
+            })
+
+            $addedUserMessage = $true
+            Write-Output "Screenshot loaded. Sending to Kimi..."
         }
         else {
             $q = $cmd
@@ -302,34 +509,16 @@ function kimi-chat {
             })
         }
 
-        Trim-Messages -Messages $messages -MaxCount 25
-
-        $headers = @{
-            "Authorization" = "Bearer $env:KIMI_API_KEY"
-            "Content-Type"  = "application/json; charset=utf-8"
-        }
-
-        $bodyObj = @{
-            model = $model
-            messages = $messages
-            max_tokens = $maxTokens
-        }
-
-        if ($speedMode -eq "fast") {
-            $bodyObj.thinking = @{
-                type = "disabled"
-            }
-        }
-
-        $json = $bodyObj | ConvertTo-Json -Depth 80
-        $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+        Trim-Messages -Messages $messages -MaxCount $maxMessages
 
         try {
-            $res = Invoke-RestMethod `
-                -Uri $apiUrl `
-                -Method Post `
-                -Headers $headers `
-                -Body $bodyBytes
+            $res = Invoke-KimiRequest `
+                -ApiUrl $apiUrl `
+                -ApiKey $script:KimiApiKey `
+                -Model $model `
+                -Messages $messages `
+                -SpeedMode $speedMode `
+                -MaxTokens $maxTokens
 
             if (-not $res.choices -or -not $res.choices[0].message.content) {
                 throw "Empty response from API."
@@ -343,7 +532,7 @@ function kimi-chat {
             Write-Output $answer
             Write-Output ""
 
-            [System.IO.File]::WriteAllText($lastAnswerFile, $answer, [System.Text.Encoding]::UTF8)
+            [void](Save-LastAnswer -Path $lastAnswerFile -Answer $answer)
 
             [void]$messages.Add(@{
                 role = "assistant"
@@ -352,37 +541,37 @@ function kimi-chat {
         }
         catch {
             Write-Output ""
-            Write-Output "Request failed. The last question has been removed from context."
+            Write-Output "Request failed. The last user message has been removed from context."
+            Remove-LastUserMessage -Messages $messages
 
-            Remove-LastMessage -Messages $messages
+            $message = $_.Exception.Message
 
-            $errText = ""
-
-            if ($_.Exception.Response) {
-                try {
-                    $stream = $_.Exception.Response.GetResponseStream()
-                    $reader = New-Object System.IO.StreamReader($stream, [System.Text.Encoding]::UTF8)
-                    $errText = $reader.ReadToEnd()
-                } catch {
-                    $errText = $_.Exception.Message
-                }
+            if ($message -like "Request body build failed:*") {
+                Write-Output $message
             } else {
-                $errText = $_.Exception.Message
+                $err = Get-HttpErrorText -ErrorRecord $_
+
+                if ($null -ne $err.StatusCode) {
+                    Write-Output "HTTP status: $($err.StatusCode) $($err.StatusDescription)"
+                }
+
+                Write-Output "Error detail:"
+                Write-Output $err.Detail
+
+                if ($err.StatusCode -eq 401) {
+                    Write-Output "Tip: HTTP 401 usually means the API key is invalid or expired."
+                } else {
+                    Write-Output "Tip: Check GitHub Raw download, api.moonshot.cn, proxy settings, and the campus network."
+                }
             }
 
-            if ([string]::IsNullOrWhiteSpace($errText)) {
-                $errText = "No detailed error returned. Possible causes: network issue, invalid API key, rate limit, insufficient balance, model unavailable, or image input not supported by the selected model."
-            }
-
-            Write-Output $errText
             Write-Output ""
             Write-Output "Suggestions:"
             Write-Output "1. For long text problems, copy first, then type /clip."
             Write-Output "2. For screenshots, use Win + Shift + S first, then type /shot."
             Write-Output "3. If errors continue, type /reset."
-            Write-Output "4. If terminal display is messy, type /open."
-            Write-Output "5. If it is slow, type /fast."
-            Write-Output "6. If quality matters more, type /quality."
+            Write-Output "4. If terminal Chinese display is messy, type /open."
+            Write-Output "5. Use /fast for short answers or /quality for hard problems."
             Write-Output ""
         }
     }
