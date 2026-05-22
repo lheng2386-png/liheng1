@@ -13,9 +13,36 @@ try {
 try {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
-} catch {}
+    $script:ClipboardReady = $true
+} catch {
+    $script:ClipboardReady = $false
+}
 
 $script:KimiApiKey = $null
+
+function Protect-SecretText {
+    param(
+        [string]$Text
+    )
+
+    if ([string]::IsNullOrEmpty($Text)) {
+        return $Text
+    }
+
+    $safeText = $Text
+    if (-not [string]::IsNullOrWhiteSpace($script:KimiApiKey)) {
+        $safeText = $safeText.Replace($script:KimiApiKey, "[API_KEY_HIDDEN]")
+    }
+    return $safeText
+}
+
+function Write-SafeOutput {
+    param(
+        [string]$Text
+    )
+
+    Write-Output (Protect-SecretText -Text $Text)
+}
 
 function Read-KimiApiKey {
     if (-not [string]::IsNullOrWhiteSpace($script:KimiApiKey)) {
@@ -27,12 +54,17 @@ function Read-KimiApiKey {
     Write-Output "Paste your Kimi API Key when asked. It will not be shown on screen."
     Write-Output ""
 
-    $secureKey = Read-Host "Enter Kimi API Key" -AsSecureString
-    $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)
     try {
-        $script:KimiApiKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
-    } finally {
-        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)
+        $secureKey = Read-Host "Enter Kimi API Key" -AsSecureString
+        $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)
+        try {
+            $script:KimiApiKey = ([Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)).Trim()
+        } finally {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)
+        }
+    } catch {
+        Write-Output "ERROR: Failed to read API key."
+        exit 1
     }
 
     if ([string]::IsNullOrWhiteSpace($script:KimiApiKey)) {
@@ -160,6 +192,10 @@ function Remove-LastUserMessage {
 }
 
 function Get-ClipboardTextSafe {
+    if (-not $script:ClipboardReady) {
+        return $null
+    }
+
     try {
         if ([System.Windows.Forms.Clipboard]::ContainsText()) {
             return [System.Windows.Forms.Clipboard]::GetText()
@@ -182,6 +218,19 @@ function Set-ClipboardTextSafe {
         [string]$Text
     )
 
+    if ([string]::IsNullOrEmpty($Text)) {
+        return $false
+    }
+
+    if (-not $script:ClipboardReady) {
+        try {
+            Set-Clipboard -Value $Text -ErrorAction Stop
+            return $true
+        } catch {
+            return $false
+        }
+    }
+
     try {
         [System.Windows.Forms.Clipboard]::SetText($Text)
         return $true
@@ -196,6 +245,10 @@ function Set-ClipboardTextSafe {
 }
 
 function Get-ClipboardImageDataUrl {
+    if (-not $script:ClipboardReady) {
+        return $null
+    }
+
     try {
         if (-not [System.Windows.Forms.Clipboard]::ContainsImage()) {
             return $null
@@ -210,6 +263,9 @@ function Get-ClipboardImageDataUrl {
         try {
             $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
             $bytes = $ms.ToArray()
+            if ($bytes.Length -gt 5242880) {
+                return "IMAGE_TOO_LARGE"
+            }
             $base64 = [Convert]::ToBase64String($bytes)
             return "data:image/png;base64,$base64"
         } finally {
@@ -285,6 +341,8 @@ function Get-HttpErrorText {
         $detail = "No detailed error returned."
     }
 
+    $detail = Protect-SecretText -Text $detail
+
     return @{
         StatusCode = $statusCode
         StatusDescription = $statusDescription
@@ -305,6 +363,24 @@ function Save-LastAnswer {
     } catch {
         Write-Output "Failed to save last_answer.txt."
         return $false
+    }
+}
+
+function Open-LastAnswerFile {
+    param(
+        [string]$Path
+    )
+
+    if (-not (Test-Path $Path)) {
+        Write-Output "No saved answer yet."
+        return
+    }
+
+    try {
+        Start-Process notepad $Path -ErrorAction Stop
+    } catch {
+        Write-Output "Failed to open Notepad. The answer is still saved here:"
+        Write-Output $Path
     }
 }
 
@@ -331,6 +407,7 @@ function Invoke-KimiRequest {
         -Headers $headers `
         -ContentType "application/json; charset=utf-8" `
         -Body $bodyBytes `
+        -TimeoutSec 120 `
         -ErrorAction Stop
 }
 
@@ -358,7 +435,17 @@ function kimi-chat {
     Show-Help
 
     while ($true) {
-        $q = Read-Host "You"
+        try {
+            $q = Read-Host "You"
+        } catch {
+            Write-Output "Input failed. Try again, or type /exit to quit."
+            continue
+        }
+
+        if ($null -eq $q) {
+            continue
+        }
+
         $cmd = $q.Trim()
 
         if ([string]::IsNullOrWhiteSpace($cmd)) {
@@ -417,11 +504,7 @@ function kimi-chat {
         }
 
         if ($cmd -eq "/open") {
-            if (Test-Path $lastAnswerFile) {
-                Start-Process notepad $lastAnswerFile
-            } else {
-                Write-Output "No saved answer yet."
-            }
+            Open-LastAnswerFile -Path $lastAnswerFile
             continue
         }
 
@@ -465,13 +548,22 @@ function kimi-chat {
         elseif ($cmd -eq "/shot") {
             $dataUrl = Get-ClipboardImageDataUrl
 
+            if ($dataUrl -eq "IMAGE_TOO_LARGE") {
+                Write-Output "Clipboard image is too large. Try a smaller screenshot, or copy the problem text and use /clip."
+                continue
+            }
+
             if ([string]::IsNullOrWhiteSpace($dataUrl)) {
                 Write-Output "Clipboard has no image. Use Win + Shift + S first, then type /shot."
                 Write-Output "If this school computer blocks image clipboard access, /clip still works for copied text."
                 continue
             }
 
-            $imgQuestion = Read-Host "Question for this screenshot"
+            try {
+                $imgQuestion = Read-Host "Question for this screenshot"
+            } catch {
+                $imgQuestion = ""
+            }
 
             if ([string]::IsNullOrWhiteSpace($imgQuestion)) {
                 $imgQuestion = "Please solve this problem. If it is a C++ or algorithm problem, explain in Chinese and provide a beginner-friendly C++17 solution."
@@ -577,4 +669,11 @@ function kimi-chat {
     }
 }
 
-kimi-chat
+try {
+    kimi-chat
+} catch {
+    Write-Output ""
+    Write-Output "Fatal error. The script stopped safely."
+    Write-Output (Protect-SecretText -Text $_.Exception.Message)
+    Write-Output "You can restart PowerShell and run the launch command again."
+}

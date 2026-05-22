@@ -12,31 +12,37 @@
 
 ## 使用方法
 
-在学校电脑里打开 **Windows PowerShell**，优先复制下面这个最短命令运行。
+在学校电脑里打开 **Windows PowerShell**。
 
-最短版：
+先只用这一条：
 
 ```powershell
 irm https://raw.githubusercontent.com/lheng2386-png/liheng1/main/k.ps1|iex
 ```
 
-这个命令会先读取仓库里的短启动器 `k.ps1`，再自动加载真正的主脚本 `start_kimi.ps1`。
+能启动就不用看下面的命令了。
 
-如果最短版因为学校电脑的 PowerShell/TLS 设置失败，再试下面这个兼容短命令。
-
-兼容短命令：
+如果上面那条失败，再用这一条：
 
 ```powershell
 [Net.ServicePointManager]::SecurityProtocol=3072;iex(iwr -UseBasicParsing https://raw.githubusercontent.com/lheng2386-png/liheng1/main/k.ps1).Content
 ```
 
-这两个短命令都不需要记 `-OutFile k.ps1`、`Set-ExecutionPolicy`、`.\k.ps1`。
+大多数情况只需要这两条里的其中一条。它们最终都会运行同一个主脚本 `start_kimi.ps1`，功能一样。
 
-短命令和下面的备用命令最终运行的是同一个主脚本，功能效果一样。区别是：短命令不保存主脚本文件，备用命令会先下载成 `k.ps1` 再运行。
+## 什么时候用哪个命令
 
-如果短命令不能用，再使用下面的备用方式。
+| 情况 | 用哪个 |
+| --- | --- |
+| 正常学校机房电脑 | 用第一条：`irm .../k.ps1\|iex` |
+| 第一条提示 TLS、连接失败、下载失败 | 用第二条：`[Net.ServicePointManager]...` |
+| 想把启动脚本保存到本地，之后重复运行 | 用下面的“保存版” |
 
-备用多行版：
+## 保存版启动方式
+
+一般不用这个。只有你想把启动脚本保存成 `k.ps1`，以后直接运行，才用保存版。
+
+保存版，多行：
 
 ```powershell
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -45,7 +51,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\k.ps1
 ```
 
-备用一行版：
+保存版，一行：
 
 ```powershell
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; iwr -UseBasicParsing "https://raw.githubusercontent.com/lheng2386-png/liheng1/main/k.ps1" -OutFile k.ps1; Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; .\k.ps1
