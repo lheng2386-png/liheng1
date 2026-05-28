@@ -1,5 +1,6 @@
 # k.ps1
 # Short launcher for start_kimi.ps1. Keep this file ASCII-only.
+# School lab note: use jsDelivr first because GitHub Raw DNS may fail.
 
 try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -9,7 +10,7 @@ try {
     } catch {}
 }
 
-$url = "https://raw.githubusercontent.com/lheng2386-png/liheng1/main/start_kimi.ps1"
+$url = "https://cdn.jsdelivr.net/gh/lheng2386-png/liheng1@main/start_kimi.ps1"
 
 try {
     $scriptText = (iwr -UseBasicParsing $url -ErrorAction Stop).Content
@@ -18,8 +19,8 @@ try {
     }
     iex $scriptText
 } catch {
-    Write-Output "Failed to load start_kimi.ps1 from GitHub Raw."
-    Write-Output "Check GitHub Raw access, proxy settings, TLS, and the campus network."
+    Write-Output "Failed to load start_kimi.ps1 from jsDelivr CDN."
+    Write-Output "Check cdn.jsdelivr.net access, proxy settings, TLS, and the campus network."
     Write-Output "URL: $url"
     Write-Output $_.Exception.Message
 }
