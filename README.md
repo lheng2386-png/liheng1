@@ -23,7 +23,7 @@ Project goals:
 Use this command first on the tested school Windows 10 lab environment:
 
 ```powershell
-[Net.ServicePointManager]::SecurityProtocol=3072; irm "https://cdn.jsdelivr.net/gh/lheng2386-png/liheng1@main/k.ps1"|iex
+[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Remove-Item .\k.ps1 -ErrorAction SilentlyContinue; iwr -UseBasicParsing "https://cdn.jsdelivr.net/gh/lheng2386-png/liheng1@main/start_kimi.ps1" -OutFile .\k.ps1; Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; .\k.ps1
 ```
 
 Why this is the first recommended command:
@@ -32,10 +32,17 @@ Why this is the first recommended command:
 - In the real school lab test, `raw.githubusercontent.com` failed DNS resolution.
 - The observed PowerShell error was: `The remote name could not be resolved: raw.githubusercontent.com`.
 - `cdn.jsdelivr.net` worked successfully in the tested school network.
-- This command downloads `k.ps1` through the jsDelivr CDN. The launcher then downloads `start_kimi.ps1` through jsDelivr and runs it.
-- It does not save the launcher permanently. For step-by-step debugging, use the multi-line version below.
+- This command downloads `start_kimi.ps1` through the jsDelivr CDN and runs it locally as `k.ps1`.
+- It does not require browser login, phone, USB drive, PowerShell 7, Python, npm, `curl.exe`, or third-party PowerShell modules.
+- For step-by-step debugging, use the multi-line version below.
 
 After startup, the script asks for your Kimi API Key at runtime. Do not put your API key into this repository.
+
+Optional shorter jsDelivr launcher:
+
+```powershell
+[Net.ServicePointManager]::SecurityProtocol=3072; irm "https://cdn.jsdelivr.net/gh/lheng2386-png/liheng1@main/k.ps1"|iex
+```
 
 ## Multi-Line jsDelivr Version
 
@@ -198,7 +205,7 @@ Solution:
 Use the jsDelivr CDN startup command:
 
 ```powershell
-[Net.ServicePointManager]::SecurityProtocol=3072; irm "https://cdn.jsdelivr.net/gh/lheng2386-png/liheng1@main/k.ps1"|iex
+[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Remove-Item .\k.ps1 -ErrorAction SilentlyContinue; iwr -UseBasicParsing "https://cdn.jsdelivr.net/gh/lheng2386-png/liheng1@main/start_kimi.ps1" -OutFile .\k.ps1; Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; .\k.ps1
 ```
 
 ### `iwr` or `Invoke-WebRequest` fails
